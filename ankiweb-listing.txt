@@ -1,0 +1,32 @@
+TITLE
+Pavlov: Photo Rewards
+
+TAGS
+reward motivation photo image gamification
+
+DESCRIPTION
+Reward yourself with your own photos for getting cards right.
+
+Each time you press Hard, Good or Easy, Pavlov shows a random photo from a folder you choose: holiday snaps, pets, family, anything you enjoy. A small, personal reward gives you something to look forward to in every review session.
+
+FEATURES
+- Use any folder on your computer, including Google Drive (through Google Drive for Desktop).
+- Choose which answer buttons earn a photo, how long it stays up, and how often it appears. Set a chance below 100% for surprise rewards.
+- Every photo is shown once before any repeats.
+- Works on AnkiMobile and AnkiDroid too (see below).
+
+GETTING STARTED
+1. Tools > Pavlov > Choose Photo Folder...
+2. Study as usual. Click a photo to close it early.
+
+PHONES AND TABLETS
+AnkiMobile and AnkiDroid can't run add-ons. On your computer, use Tools > Pavlov > Copy Photos to Phone/Tablet..., then sync. A random photo then appears each time you reveal an answer on your phone or tablet. Phone and tablet apps don't say which button you pressed, so the photo shows whether or not you got the card right.
+
+This adds a small script to the back of your card types. Tools > Pavlov > Remove from Phone/Tablet... removes it again.
+
+SETTINGS
+Tools > Add-ons > Pavlov > Config
+
+Supported formats: JPG, PNG, WebP, BMP, GIF (first frame). HEIC isn't supported.
+
+Bug reports and source code: https://github.com/YazenzM/anki-pavlov

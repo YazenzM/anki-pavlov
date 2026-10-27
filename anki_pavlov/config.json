@@ -1,0 +1,9 @@
+{
+    "photo_folder": "",
+    "include_subfolders": true,
+    "reward_on_buttons": [2, 3, 4],
+    "chance": 1.0,
+    "display_seconds": 3,
+    "max_image_size": 1600,
+    "mobile_photo_count": 100
+}
