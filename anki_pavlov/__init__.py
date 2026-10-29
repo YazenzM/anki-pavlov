@@ -11,10 +11,39 @@ from concurrent.futures import Future
 
 from aqt import gui_hooks, mw
 from aqt.operations import QueryOp
-from aqt.qt import QBuffer, QByteArray, QFileDialog, QImage, QImageReader, QIODevice, QMenu, Qt
+from aqt.qt import (
+    QBuffer,
+    QByteArray,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QImage,
+    QImageReader,
+    QIODevice,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QSpinBox,
+    Qt,
+)
 from aqt.utils import askUser, qconnect, showInfo, showWarning, tooltip
 
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+LAYOUTS = {
+    "bottom-right": "Bottom-right corner",
+    "bottom-left": "Bottom-left corner",
+    "top-right": "Top-right corner",
+    "top-left": "Top-left corner",
+    "side": "Panel on the right",
+    "fullscreen": "Full screen",
+}
+DEFAULT_LAYOUT = "bottom-right"
+BUTTON_NAMES = ("Again", "Hard", "Good", "Easy")
 
 # Phones and tablets can't run add-ons, so for them photos are copied into Anki's media folder as
 # _pavlov_0001.jpg, _pavlov_0002.jpg, ... and a script on the back of every card picks one at random.
@@ -31,28 +60,47 @@ _loading = False
 _warned_no_folder = False
 
 # Plain ES5 so it also runs in the older web views used by phone and tablet apps.
-_OVERLAY_JS = """(function (src, ms) {
+# The side panel pads the page so the card reflows beside it instead of underneath.
+_OVERLAY_JS = """(function (src, ms, layout, size) {
     var old = document.getElementById("pavlov-reward");
     if (old) old.parentNode.removeChild(old);
-    var overlay = document.createElement("div");
-    overlay.id = "pavlov-reward";
-    overlay.style.cssText = "position:fixed;top:0;right:0;bottom:0;left:0;z-index:99999;display:flex;" +
-        "align-items:center;justify-content:center;background:rgba(0,0,0,.8);opacity:0;transition:opacity .25s;cursor:pointer";
+    var root = document.documentElement;
+    var box = document.createElement("div");
     var img = document.createElement("img");
-    img.style.cssText = "max-width:90vw;max-height:90vh;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.6)";
+    var boxCss = "position:fixed;z-index:99999;opacity:0;transition:opacity .25s;cursor:pointer;";
+    var imgCss = "display:block;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.6);";
+    if (layout === "fullscreen") {
+        boxCss += "top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.8)";
+        imgCss += "max-width:90vw;max-height:90vh";
+    } else if (layout === "side") {
+        boxCss += "top:0;right:0;bottom:0;width:" + size + "vw;display:flex;align-items:center;justify-content:center";
+        imgCss += "max-width:calc(100%% - 24px);max-height:calc(100%% - 24px)";
+    } else {
+        var edges = layout.split("-");
+        boxCss += edges[0] + ":16px;" + edges[1] + ":16px";
+        imgCss += "max-width:" + size + "vw;max-height:" + size + "vh";
+    }
+    box.id = "pavlov-reward";
+    box.style.cssText = boxCss;
+    img.style.cssText = imgCss;
     img.onerror = close;
     img.src = src;
-    overlay.appendChild(img);
-    document.body.appendChild(overlay);
-    void overlay.offsetWidth;
-    overlay.style.opacity = "1";
+    box.appendChild(img);
+    document.body.appendChild(box);
+    root.style.paddingRight = layout === "side" ? size + "vw" : "";
+    void box.offsetWidth;
+    box.style.opacity = "1";
     function close() {
-        overlay.style.opacity = "0";
-        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 250);
+        if (document.getElementById("pavlov-reward") !== box) return;
+        box.style.opacity = "0";
+        setTimeout(function () {
+            if (box.parentNode) box.parentNode.removeChild(box);
+            if (!document.getElementById("pavlov-reward")) root.style.paddingRight = "";
+        }, 250);
     }
-    overlay.addEventListener("click", close);
-    setTimeout(close, ms);
-})(%s, %d);"""
+    box.addEventListener("click", close);
+    if (ms > 0) setTimeout(close, ms);
+})(%s, %d, %s, %d);"""
 
 _MOBILE_JS = """(function () {
     if (Math.random() >= %s) return;
@@ -61,7 +109,10 @@ _MOBILE_JS = """(function () {
     %s
 })();"""
 
-_HIDE_JS = 'document.getElementById("pavlov-reward")?.remove();'
+_HIDE_JS = """(function () {
+    document.getElementById("pavlov-reward")?.remove();
+    document.documentElement.style.paddingRight = "";
+})();"""
 
 
 def _config() -> dict:
@@ -71,6 +122,18 @@ def _config() -> dict:
 def _photo_folder(config: dict) -> str | None:
     folder = config.get("photo_folder", "")
     return folder if folder and os.path.isdir(folder) else None
+
+
+def _layout(config: dict) -> str:
+    layout = config.get("layout", DEFAULT_LAYOUT)
+    return layout if layout in LAYOUTS else DEFAULT_LAYOUT
+
+
+def _overlay_js(src: str, config: dict) -> str:
+    """JS that shows the photo at src, which must itself be a JS expression."""
+    size = max(10, min(int(config.get("photo_size", 30)), 90))
+    duration_ms = int(config.get("display_seconds", 20) * 1000)
+    return _OVERLAY_JS % (src, duration_ms, json.dumps(_layout(config)), size)
 
 
 def _scan(folder: str, recursive: bool) -> list[str]:
@@ -138,7 +201,7 @@ def _on_answer(reviewer, card, ease: int) -> None:
     folder = _photo_folder(config)
     if not folder:
         if not _warned_no_folder:
-            tooltip("Pavlov: choose a photo folder via Tools > Pavlov > Choose Photo Folder")
+            tooltip("Pavlov: choose a photo folder via Tools > Pavlov > Settings")
             _warned_no_folder = True
         return
     if _loading:
@@ -147,7 +210,6 @@ def _on_answer(reviewer, card, ease: int) -> None:
     _loading = True
     recursive = config.get("include_subfolders", True)
     max_size = config.get("max_image_size", 1600)
-    duration_ms = int(config.get("display_seconds", 3) * 1000)
 
     # Loading runs off the main thread so slow drives (e.g. Google Drive streaming) don't freeze reviews.
     def on_done(future: Future) -> None:
@@ -162,13 +224,15 @@ def _on_answer(reviewer, card, ease: int) -> None:
             tooltip(f"Pavlov: no photos found in {folder}")
             return
         if mw.state == "review":
-            mw.reviewer.web.eval(_OVERLAY_JS % (json.dumps(uri), duration_ms))
+            mw.reviewer.web.eval(_overlay_js(json.dumps(uri), config))
 
     mw.taskman.run_in_background(lambda: _pick_and_load(folder, recursive, max_size), on_done)
 
 
 def _on_show_answer(card) -> None:
-    mw.reviewer.web.eval(_HIDE_JS)
+    # A full-screen photo covers the card, so it makes way for the answer. Other layouts wait for their timer.
+    if _layout(_config()) == "fullscreen":
+        mw.reviewer.web.eval(_HIDE_JS)
 
 
 def _on_card_will_show(text: str, card, kind: str) -> str:
@@ -179,23 +243,103 @@ def _on_card_will_show(text: str, card, kind: str) -> str:
     return text
 
 
-def _choose_folder() -> None:
-    config = _config()
-    folder = QFileDialog.getExistingDirectory(mw, "Choose your reward photo folder", config.get("photo_folder", ""))
-    if not folder:
-        return
-    config["photo_folder"] = folder
-    mw.addonManager.writeConfig(__name__, config)
-    tooltip(f"Pavlov will show photos from:<br>{folder}")
+class SettingsDialog(QDialog):
+    def __init__(self) -> None:
+        super().__init__(mw)
+        self.setWindowTitle("Pavlov Settings")
+        config = _config()
+
+        self.folder = QLineEdit(config.get("photo_folder", ""))
+        browse = QPushButton("Browse...")
+        qconnect(browse.clicked, self._browse)
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(self.folder)
+        folder_row.addWidget(browse)
+
+        self.subfolders = QCheckBox("Include subfolders")
+        self.subfolders.setChecked(config.get("include_subfolders", True))
+
+        self.layout_choice = QComboBox()
+        for key, label in LAYOUTS.items():
+            self.layout_choice.addItem(label, key)
+        self.layout_choice.setCurrentIndex(self.layout_choice.findData(_layout(config)))
+        qconnect(self.layout_choice.currentIndexChanged, self._update_size_enabled)
+
+        self.photo_size = QSpinBox()
+        self.photo_size.setRange(10, 90)
+        self.photo_size.setSuffix("% of the window")
+        self.photo_size.setValue(int(config.get("photo_size", 30)))
+
+        self.seconds = QSpinBox()
+        self.seconds.setRange(0, 600)
+        self.seconds.setSuffix(" seconds")
+        self.seconds.setSpecialValueText("Until clicked")
+        self.seconds.setValue(int(config.get("display_seconds", 20)))
+
+        self.chance = QSpinBox()
+        self.chance.setRange(0, 100)
+        self.chance.setSuffix("%")
+        self.chance.setValue(round(config.get("chance", 1.0) * 100))
+
+        rewarded = config.get("reward_on_buttons", [2, 3, 4])
+        self.answer_boxes = []
+        answers_row = QHBoxLayout()
+        for ease, name in enumerate(BUTTON_NAMES, start=1):
+            box = QCheckBox(name)
+            box.setChecked(ease in rewarded)
+            self.answer_boxes.append(box)
+            answers_row.addWidget(box)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        qconnect(buttons.accepted, self.accept)
+        qconnect(buttons.rejected, self.reject)
+
+        form = QFormLayout(self)
+        form.addRow("Photo folder:", folder_row)
+        form.addRow("", self.subfolders)
+        form.addRow("Layout:", self.layout_choice)
+        form.addRow("Photo size:", self.photo_size)
+        form.addRow("Show each photo for:", self.seconds)
+        form.addRow("Chance of a photo:", self.chance)
+        form.addRow("Reward these answers:", answers_row)
+        form.addRow(buttons)
+        self._update_size_enabled()
+
+    def _browse(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Choose your reward photo folder", self.folder.text())
+        if folder:
+            self.folder.setText(folder)
+
+    def _update_size_enabled(self) -> None:
+        self.photo_size.setEnabled(self.layout_choice.currentData() != "fullscreen")
+
+    def accept(self) -> None:
+        config = _config()
+        config.update(
+            photo_folder=self.folder.text().strip(),
+            include_subfolders=self.subfolders.isChecked(),
+            layout=self.layout_choice.currentData(),
+            photo_size=self.photo_size.value(),
+            display_seconds=self.seconds.value(),
+            chance=self.chance.value() / 100,
+            reward_on_buttons=[ease for ease, box in enumerate(self.answer_boxes, start=1) if box.isChecked()],
+        )
+        mw.addonManager.writeConfig(__name__, config)
+        _refresh_mobile_snippet(config)
+        super().accept()
+
+
+def _open_settings() -> None:
+    SettingsDialog().exec()
 
 
 def _mobile_name(number: int) -> str:
     return f"{MOBILE_PREFIX}{number:04d}.jpg"
 
 
-def _mobile_snippet(count: int, chance: float, duration_ms: int) -> str:
+def _mobile_snippet(count: int, config: dict) -> str:
     src = json.dumps(MOBILE_PREFIX) + ' + n + ".jpg"'
-    js = _MOBILE_JS % (chance, count, _OVERLAY_JS % (src, duration_ms))
+    js = _MOBILE_JS % (config.get("chance", 1.0), count, _overlay_js(src, config))
     return f"{SNIPPET_START}\n<script>\n{js}\n</script>\n{SNIPPET_END}"
 
 
@@ -215,6 +359,15 @@ def _set_snippet(snippet: str | None) -> None:
                 changed = True
         if changed:
             mw.col.models.update_dict(notetype)
+
+
+def _refresh_mobile_snippet(config: dict) -> None:
+    """Bring the phone/tablet script in line with new settings, if photos have been copied for it."""
+    if mw.col is None:
+        return
+    count = sum(1 for name in os.listdir(mw.col.media.dir()) if name.startswith(MOBILE_PREFIX))
+    if count:
+        _set_snippet(_mobile_snippet(count, config))
 
 
 def _export_photos(folder: str, recursive: bool, count: int, max_size: int, media_dir: str) -> int:
@@ -251,7 +404,7 @@ def _copy_to_mobile() -> None:
     config = _config()
     folder = _photo_folder(config)
     if not folder:
-        showWarning("Choose a photo folder first via Tools > Pavlov > Choose Photo Folder.")
+        showWarning("Choose a photo folder first via Tools > Pavlov > Settings.")
         return
 
     count = min(config.get("mobile_photo_count", 100), 9999)
@@ -265,14 +418,13 @@ def _copy_to_mobile() -> None:
 
     recursive = config.get("include_subfolders", True)
     max_size = config.get("max_image_size", 1600)
-    duration_ms = int(config.get("display_seconds", 3) * 1000)
     media_dir = mw.col.media.dir()
 
     def on_success(written: int) -> None:
         if written == 0:
             showWarning(f"No photos found in {folder}")
             return
-        _set_snippet(_mobile_snippet(written, config.get("chance", 1.0), duration_ms))
+        _set_snippet(_mobile_snippet(written, config))
         showInfo(
             f"Copied {written} photos.\n\n"
             "Now sync Anki on this computer, then sync on your phone or tablet. "
@@ -300,10 +452,11 @@ def _remove_from_mobile() -> None:
 gui_hooks.reviewer_did_answer_card.append(_on_answer)
 gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
 gui_hooks.card_will_show.append(_on_card_will_show)
+mw.addonManager.setConfigUpdatedAction(__name__, _refresh_mobile_snippet)
 
 _menu = QMenu("Pavlov", mw)
 for _label, _handler in (
-    ("Choose Photo Folder...", _choose_folder),
+    ("Settings...", _open_settings),
     ("Copy Photos to Phone/Tablet...", _copy_to_mobile),
     ("Remove from Phone/Tablet...", _remove_from_mobile),
 ):

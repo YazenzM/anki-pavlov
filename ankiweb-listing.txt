@@ -11,12 +11,13 @@ Each time you press Hard, Good or Easy, Pavlov shows a random photo from a folde
 
 FEATURES
 - Use any folder on your computer, including Google Drive (through Google Drive for Desktop).
-- Choose which answer buttons earn a photo, how long it stays up, and how often it appears. Set a chance below 100% for surprise rewards.
+- Put the photo in a corner or a side panel so it doesn't block your next card, or show it full screen.
+- Choose the photo size, how long it stays up, which answer buttons earn one, and how often it appears. Set a chance below 100% for surprise rewards.
 - Every photo is shown once before any repeats.
 - Works on AnkiMobile and AnkiDroid too (see below).
 
 GETTING STARTED
-1. Tools > Pavlov > Choose Photo Folder...
+1. Tools > Pavlov > Settings... and choose a photo folder.
 2. Study as usual. Click a photo to close it early.
 
 PHONES AND TABLETS
@@ -25,7 +26,7 @@ AnkiMobile and AnkiDroid can't run add-ons. On your computer, use Tools > Pavlov
 This adds a small script to the back of your card types. Tools > Pavlov > Remove from Phone/Tablet... removes it again.
 
 SETTINGS
-Tools > Add-ons > Pavlov > Config
+Tools > Pavlov > Settings...
 
 Supported formats: JPG, PNG, WebP, BMP, GIF (first frame). HEIC isn't supported.
 
