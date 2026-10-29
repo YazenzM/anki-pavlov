@@ -1,11 +1,14 @@
 {
     "photo_folder": "",
     "include_subfolders": true,
+    "reward_mode": "every",
+    "answers_needed": 5,
+    "chance": 1.0,
+    "reward_on_buttons": [2, 3, 4],
+    "flair": true,
     "layout": "bottom-right",
     "photo_size": 30,
     "display_seconds": 20,
-    "reward_on_buttons": [2, 3, 4],
-    "chance": 1.0,
     "max_image_size": 1600,
     "mobile_photo_count": 100
 }

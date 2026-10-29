@@ -45,6 +45,13 @@ LAYOUTS = {
 DEFAULT_LAYOUT = "bottom-right"
 BUTTON_NAMES = ("Again", "Hard", "Good", "Easy")
 
+REWARD_MODES = {
+    "every": "After each right answer",
+    "streak": "After a streak of right answers (a miss resets it)",
+    "count": "After a number of right answers (misses don't reset it)",
+}
+DEFAULT_MODE = "every"
+
 # Phones and tablets can't run add-ons, so for them photos are copied into Anki's media folder as
 # _pavlov_0001.jpg, _pavlov_0002.jpg, ... and a script on the back of every card picks one at random.
 # The leading underscore stops Check Media from reporting the files as unused.
@@ -58,6 +65,10 @@ _queue: list[str] = []
 _queue_source: tuple[str, bool] | None = None
 _loading = False
 _warned_no_folder = False
+
+# Right answers in a row, and in total, since Anki started.
+_streak = 0
+_right_count = 0
 
 # Plain ES5 so it also runs in the older web views used by phone and tablet apps.
 # The side panel pads the page so the card reflows beside it instead of underneath.
@@ -114,6 +125,44 @@ _HIDE_JS = """(function () {
     document.documentElement.style.paddingRight = "";
 })();"""
 
+# A badge with the given text pops up at the bottom of the screen with a burst of confetti behind it.
+# Called as _FLAIR_JS + "(text);". Desktop only, since phones and tablets can't tell right from wrong.
+_FLAIR_JS = """(function (text) {
+    document.getElementById("pavlov-flair")?.remove();
+    var layer = document.createElement("div");
+    layer.id = "pavlov-flair";
+    layer.style.cssText = "position:fixed;left:50%;bottom:32px;z-index:100000;pointer-events:none";
+    var badge = document.createElement("div");
+    badge.textContent = text;
+    badge.style.cssText = "transform:translateX(-50%) scale(.6);opacity:0;transition:transform .3s cubic-bezier(.2,1.6,.4,1),opacity .3s;" +
+        "padding:6px 14px;border-radius:999px;background:#16a34a;color:#fff;font:600 15px system-ui,sans-serif;" +
+        "white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.25)";
+    layer.appendChild(badge);
+    var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var colors = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#a855f7"];
+    var bits = [];
+    for (var i = 0; !calm && i < 24; i++) {
+        var bit = document.createElement("div");
+        bit.style.cssText = "position:absolute;left:-4px;top:0;width:8px;height:8px;border-radius:2px;background:" +
+            colors[i % colors.length] + ";transition:transform .9s cubic-bezier(.1,.8,.3,1),opacity .9s ease-in";
+        layer.appendChild(bit);
+        bits.push(bit);
+    }
+    document.body.appendChild(layer);
+    void layer.offsetWidth;
+    badge.style.transform = "translateX(-50%) scale(1)";
+    badge.style.opacity = "1";
+    bits.forEach(function (bit) {
+        var angle = Math.PI * (0.1 + 0.8 * Math.random());
+        var distance = 60 + 100 * Math.random();
+        bit.style.transform = "translate(" + Math.cos(angle) * distance + "px," + -Math.sin(angle) * distance + "px) " +
+            "rotate(" + 720 * Math.random() + "deg)";
+        bit.style.opacity = "0";
+    });
+    setTimeout(function () { badge.style.opacity = "0"; }, 1300);
+    setTimeout(function () { layer.remove(); }, 1700);
+})"""
+
 
 def _config() -> dict:
     return mw.addonManager.getConfig(__name__) or {}
@@ -127,6 +176,11 @@ def _photo_folder(config: dict) -> str | None:
 def _layout(config: dict) -> str:
     layout = config.get("layout", DEFAULT_LAYOUT)
     return layout if layout in LAYOUTS else DEFAULT_LAYOUT
+
+
+def _mode(config: dict) -> str:
+    mode = config.get("reward_mode", DEFAULT_MODE)
+    return mode if mode in REWARD_MODES else DEFAULT_MODE
 
 
 def _overlay_js(src: str, config: dict) -> str:
@@ -191,13 +245,35 @@ def _pick_and_load(folder: str, recursive: bool, max_size: int) -> str | None:
 
 
 def _on_answer(reviewer, card, ease: int) -> None:
-    global _loading, _warned_no_folder
+    global _streak, _right_count
     config = _config()
     if ease not in config.get("reward_on_buttons", [2, 3, 4]):
+        _streak = 0
         return
-    if random.random() >= config.get("chance", 1.0):
-        return
+    _streak += 1
+    _right_count += 1
 
+    mode = _mode(config)
+    needed = max(1, int(config.get("answers_needed", 5)))
+    if config.get("flair", True):
+        if mode == "count":
+            text = f"✓ {(_right_count - 1) % needed + 1} of {needed}"
+        else:
+            text = f"🔥 {_streak} in a row" if _streak > 1 else "✓"
+        mw.reviewer.web.eval(f"{_FLAIR_JS}({json.dumps(text)});")
+
+    if mode == "streak":
+        earned = _streak % needed == 0
+    elif mode == "count":
+        earned = _right_count % needed == 0
+    else:
+        earned = random.random() < config.get("chance", 1.0)
+    if earned:
+        _show_photo(config)
+
+
+def _show_photo(config: dict) -> None:
+    global _loading, _warned_no_folder
     folder = _photo_folder(config)
     if not folder:
         if not _warned_no_folder:
@@ -259,11 +335,21 @@ class SettingsDialog(QDialog):
         self.subfolders = QCheckBox("Include subfolders")
         self.subfolders.setChecked(config.get("include_subfolders", True))
 
+        self.mode_choice = QComboBox()
+        for key, label in REWARD_MODES.items():
+            self.mode_choice.addItem(label, key)
+        self.mode_choice.setCurrentIndex(self.mode_choice.findData(_mode(config)))
+        qconnect(self.mode_choice.currentIndexChanged, self._update_enabled)
+
+        self.needed = QSpinBox()
+        self.needed.setRange(2, 100)
+        self.needed.setValue(int(config.get("answers_needed", 5)))
+
         self.layout_choice = QComboBox()
         for key, label in LAYOUTS.items():
             self.layout_choice.addItem(label, key)
         self.layout_choice.setCurrentIndex(self.layout_choice.findData(_layout(config)))
-        qconnect(self.layout_choice.currentIndexChanged, self._update_size_enabled)
+        qconnect(self.layout_choice.currentIndexChanged, self._update_enabled)
 
         self.photo_size = QSpinBox()
         self.photo_size.setRange(10, 90)
@@ -290,6 +376,9 @@ class SettingsDialog(QDialog):
             self.answer_boxes.append(box)
             answers_row.addWidget(box)
 
+        self.flair = QCheckBox("Celebrate right answers with confetti and a streak counter")
+        self.flair.setChecked(config.get("flair", True))
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         qconnect(buttons.accepted, self.accept)
         qconnect(buttons.rejected, self.reject)
@@ -297,20 +386,26 @@ class SettingsDialog(QDialog):
         form = QFormLayout(self)
         form.addRow("Photo folder:", folder_row)
         form.addRow("", self.subfolders)
+        form.addRow("Show a photo:", self.mode_choice)
+        form.addRow("Right answers needed:", self.needed)
+        form.addRow("Chance of a photo:", self.chance)
+        form.addRow("Count as right:", answers_row)
         form.addRow("Layout:", self.layout_choice)
         form.addRow("Photo size:", self.photo_size)
         form.addRow("Show each photo for:", self.seconds)
-        form.addRow("Chance of a photo:", self.chance)
-        form.addRow("Reward these answers:", answers_row)
+        form.addRow("", self.flair)
         form.addRow(buttons)
-        self._update_size_enabled()
+        self._update_enabled()
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose your reward photo folder", self.folder.text())
         if folder:
             self.folder.setText(folder)
 
-    def _update_size_enabled(self) -> None:
+    def _update_enabled(self) -> None:
+        every = self.mode_choice.currentData() == "every"
+        self.needed.setEnabled(not every)
+        self.chance.setEnabled(every)
         self.photo_size.setEnabled(self.layout_choice.currentData() != "fullscreen")
 
     def accept(self) -> None:
@@ -318,6 +413,9 @@ class SettingsDialog(QDialog):
         config.update(
             photo_folder=self.folder.text().strip(),
             include_subfolders=self.subfolders.isChecked(),
+            reward_mode=self.mode_choice.currentData(),
+            answers_needed=self.needed.value(),
+            flair=self.flair.isChecked(),
             layout=self.layout_choice.currentData(),
             photo_size=self.photo_size.value(),
             display_seconds=self.seconds.value(),
@@ -338,8 +436,14 @@ def _mobile_name(number: int) -> str:
 
 
 def _mobile_snippet(count: int, config: dict) -> str:
+    # Phones and tablets can't see which button was pressed, so streak and count modes become matching odds:
+    # "every 5 right answers" shows a photo on about 1 card in 5.
+    if _mode(config) == "every":
+        chance = config.get("chance", 1.0)
+    else:
+        chance = 1 / max(1, int(config.get("answers_needed", 5)))
     src = json.dumps(MOBILE_PREFIX) + ' + n + ".jpg"'
-    js = _MOBILE_JS % (config.get("chance", 1.0), count, _overlay_js(src, config))
+    js = _MOBILE_JS % (chance, count, _overlay_js(src, config))
     return f"{SNIPPET_START}\n<script>\n{js}\n</script>\n{SNIPPET_END}"
 
 

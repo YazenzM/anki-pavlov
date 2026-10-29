@@ -11,6 +11,8 @@ Each time you press Hard, Good or Easy, Pavlov shows a random photo from a folde
 
 FEATURES
 - Use any folder on your computer, including Google Drive (through Google Drive for Desktop).
+- Streak mode: earn a photo with a run of right answers in a row. Or count mode: earn one every few right answers, without misses resetting your progress.
+- Optional flair: a burst of confetti and a streak counter each time you get a card right.
 - Put the photo in a corner or a side panel so it doesn't block your next card, or show it full screen.
 - Choose the photo size, how long it stays up, which answer buttons earn one, and how often it appears. Set a chance below 100% for surprise rewards.
 - Every photo is shown once before any repeats.
@@ -21,7 +23,7 @@ GETTING STARTED
 2. Study as usual. Click a photo to close it early.
 
 PHONES AND TABLETS
-AnkiMobile and AnkiDroid can't run add-ons. On your computer, use Tools > Pavlov > Copy Photos to Phone/Tablet..., then sync. A random photo then appears each time you reveal an answer on your phone or tablet. Phone and tablet apps don't say which button you pressed, so the photo shows whether or not you got the card right.
+AnkiMobile and AnkiDroid can't run add-ons. On your computer, use Tools > Pavlov > Copy Photos to Phone/Tablet..., then sync. A random photo then appears each time you reveal an answer on your phone or tablet. Phone and tablet apps don't say which button you pressed, so the photo shows whether or not you got the card right, and there's no confetti or streak counter. Streak and count modes become matching odds instead: needing 5 right answers shows a photo on about 1 card in 5.
 
 This adds a small script to the back of your card types. Tools > Pavlov > Remove from Phone/Tablet... removes it again.
 
